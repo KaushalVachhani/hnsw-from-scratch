@@ -1,14 +1,6 @@
 # HNSW from Scratch
 
-I am learning nearest-neighbor search by building it one step at a time, starting with exact search and working toward HNSW.
-
-## Phases
-
-1. `phase_1_brute_force_knn`: exact KNN with cosine similarity or Euclidean distance.
-2. `phase_2_knn_graph`: an exact KNN graph stored as an adjacency list, plus a 2D visualization.
-3. `phase_3_graph_search`: greedy graph search and its local-minimum problem.
-4. `phase_4_best_first_search`: priority-queue search with a configurable distance budget.
-5. `phase_5_nsw`: incremental NSW construction and comparison with the Phase 2 KNN graph.
+This repo is a curiosity project built for fun to understand how HNSW works one step at a time. It starts with exact nearest-neighbor search, adds graph navigation, and gradually moves toward NSW and HNSW.
 
 ## Run it
 
@@ -25,19 +17,45 @@ uv run python -m phase_5_nsw.experiment
 
 The first benchmark reaches one million 128-dimensional vectors and uses about 500 MB of memory.
 
-## Current results
+## Phases and learnings
 
-These results use the fixed seeds and settings in each experiment:
+### Phase 1: Brute-force KNN
 
-- Exact cosine KNN over 1,000,000 vectors averages 23.96 ms per query.
-- Greedy search with graph `k=10` gets Recall@1 of 0.94 with 54.34 average distance calculations, compared with 100 for brute force.
-- Best-first search with graph `k=10` and budget `60` gets Recall@1 of 0.93.
-- NSW with `M=10` and budget `70` gets Recall@1 of 0.92 and Recall@5 of 0.95.
-- The exact Phase 2 KNN graph with the same `M=10` and budget `70` gets Recall@1 of 0.96 and Recall@5 of 0.99.
+`phase_1_brute_force_knn` compares the query with every vector using cosine similarity or Euclidean distance. This gives the exact answer, so later approximate searches can be measured against it.
 
-Recall measures how often approximate search finds the true nearest neighbors. Distance calculations are the main search-work measurement. A higher recall with fewer calculations is better.
+The exact cosine benchmark over 1,000,000 vectors averages 23.96 ms per query. The result is accurate, but its work and memory grow directly with the dataset size. That limitation is why the next phase adds a graph.
 
-The Phase 2 graph uses exact neighbors found from the full dataset. NSW builds incrementally by searching the graph that exists so far, so construction is cheaper but its graph can be less connected and search quality can be lower.
+### Phase 2: KNN graph
+
+`phase_2_knn_graph` uses Phase 1 to find every point's exact nearest neighbors and stores those connections in an adjacency list.
+
+Compared with Phase 1, the vectors now have a structure that can be navigated instead of always scanning the full dataset. Building this graph is still expensive because its neighbors are exact. The main learning is that graph degree and connectivity affect whether a search can reach the right area.
+
+### Phase 3: Greedy graph search
+
+`phase_3_graph_search` starts at one graph node and repeatedly moves to the neighbor closest to the query.
+
+Phase 2 only builds the graph. This phase uses it for approximate search and reduces the number of distance calculations. With graph `k=10`, it gets Recall@1 of 0.94 with 54.34 average calculations, compared with 100 for brute force.
+
+The tradeoff is that greedy search keeps only one current route. It can stop at a local minimum even when a better node exists elsewhere in the graph. That is why the next phase keeps multiple possible routes.
+
+### Phase 4: Best-first search
+
+`phase_4_best_first_search` adds a candidate priority queue, a visited set, and a distance-calculation budget.
+
+Unlike greedy search, it can return to another promising candidate after exploring one node. There is no single search path, so the experiment tracks visited nodes, queued candidates, expansion order, and the best result. The budget also makes the recall versus search-work tradeoff explicit.
+
+With graph `k=10` and budget `60`, it gets Recall@1 of 0.93. At budget `70`, Recall@1 reaches 0.96. More graph connections and a larger budget usually improve recall, but both cost more.
+
+### Phase 5: NSW
+
+`phase_5_nsw` builds the graph incrementally. Each new vector searches the graph built so far, connects to promising nodes, and prunes connections to the configured `M`.
+
+This removes Phase 2's need to compute exact neighbors across the full dataset before searching. The tradeoff is that early insertion choices and pruning can produce a weaker or fragmented graph.
+
+With `M=10` and budget `70`, NSW gets Recall@1 of 0.92 and Recall@5 of 0.95. The exact Phase 2 KNN graph gets 0.96 and 0.99 with the same settings. With `M=2`, NSW splits into 65 connected components and 51 nodes have degree zero. This shows why connectivity is central to navigable graphs and motivates adding HNSW layers.
+
+Recall measures how often approximate search finds the true nearest neighbors. Distance calculations are the main search-work measurement. Higher recall with fewer calculations is better.
 
 ## WIP
 
